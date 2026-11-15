@@ -56,7 +56,7 @@ class Mp4MetadataAccessor(
         } else {
             val newXyz = xyzBox(location)
             val slot = file.xyzSlot
-            if (slot != null && slot.size.toInt() == newXyz.size) {
+            if (slot != null && slot.size.toInt() == newXyz.size && !file.hasLoci) {
                 newXyz.copyInto(moov, slot.offset.toInt())
                 io.write(file.moov.offset, moov)
             } else {
@@ -78,6 +78,8 @@ class Mp4MetadataAccessor(
         val udta: Box?,
         /** The existing `©xyz` box, or a blanked placeholder where one used to be. */
         val xyzSlot: Box?,
+        /** A 3GPP `loci` location box, as ffmpeg and some editors write. Replaced by `©xyz` on write. */
+        val hasLoci: Boolean,
         val metadata: MediaMetadata,
     )
 
@@ -107,26 +109,34 @@ class Mp4MetadataAccessor(
         var xyzSlot: Box? = null
         var location: GeoLocation? = null
         var redacted = false
+        var lociLocation: GeoLocation? = null
+        var hasLoci = false
         if (udta != null) {
             for (child in kids(buf, udta)) {
-                if (child.type == XYZ) {
+                if (child.type == LOCI) {
+                    hasLoci = true
+                    if (lociLocation == null) lociLocation = parseLoci(buf, child)
+                    continue
+                }
+                if (child.type == XYZ && xyzSlot?.type != XYZ) {
                     xyzSlot = child
                     location = parseXyz(buf, child)
                     if (location == null && isAllZero(buf, child.payloadOffset.toInt(), child.end.toInt())) redacted = true
-                    break
+                    continue
                 }
-                if (isRedactedPlaceholder(buf, child)) {
+                if (xyzSlot == null && isRedactedPlaceholder(buf, child)) {
                     xyzSlot = child
                     redacted = true
                 }
             }
         }
+        if (location == null) location = lociLocation
         if (location == null) {
             location = inner.firstOrNull { it.type == "meta" }?.let { readKeysLocation(buf, it) }
         }
         if (location != null) redacted = false
 
-        return ParsedFile(top, moov, buf, timeBoxes, udta, xyzSlot, MediaMetadata(dateTaken, location, redacted))
+        return ParsedFile(top, moov, buf, timeBoxes, udta, xyzSlot, hasLoci, MediaMetadata(dateTaken, location, redacted))
     }
 
     private fun kids(buf: ByteArray, parent: Box): List<Box> =
@@ -137,6 +147,32 @@ class Mp4MetadataAccessor(
         val seconds = if (buf[p].toInt() == 1) u64(buf, p + 4) else u32(buf, p + 4)
         if (seconds == 0L) return null
         return Instant.ofEpochSecond(seconds - EPOCH_1904_OFFSET)
+    }
+
+    /**
+     * 3GPP TS 26.244 location: version/flags, language, name (null-terminated), role, then
+     * longitude, latitude and altitude as signed 16.16 fixed point. Longitude comes first.
+     */
+    private fun parseLoci(buf: ByteArray, box: Box): GeoLocation? {
+        var p = box.payloadOffset.toInt() + 4 + 2
+        val end = box.end.toInt()
+        if (p + 2 <= end && (buf[p].toInt() and 0xFF) == 0xFE && (buf[p + 1].toInt() and 0xFF) == 0xFF) {
+            // UTF-16 name with BOM, ended by a 16-bit zero.
+            p += 2
+            while (p + 1 < end && (buf[p].toInt() != 0 || buf[p + 1].toInt() != 0)) p += 2
+            p += 2
+        } else {
+            while (p < end && buf[p].toInt() != 0) p++
+            p += 1
+        }
+        p += 1 // role
+        if (p + 12 > end) return null
+        val lon = u32(buf, p).toInt() / 65536.0
+        val lat = u32(buf, p + 4).toInt() / 65536.0
+        val alt = u32(buf, p + 8).toInt() / 65536.0
+        if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
+        if (lat == 0.0 && lon == 0.0) return null
+        return GeoLocation(lat, lon, alt.takeIf { it != 0.0 })
     }
 
     /** QuickTime user-data text: 16-bit length, 16-bit language, then the string. */
@@ -234,7 +270,8 @@ class Mp4MetadataAccessor(
             val payload = java.io.ByteArrayOutputStream()
             payload.write(newXyz)
             for (child in kids(moov, udta)) {
-                if (child.type == XYZ || isRedactedPlaceholder(moov, child)) continue
+                // An old 3GPP location would contradict the new one, so it goes too.
+                if (child.type == XYZ || child.type == LOCI || isRedactedPlaceholder(moov, child)) continue
                 payload.write(moov, child.offset.toInt(), child.size.toInt())
             }
             newUdta = BoxParser.box("udta", payload.toByteArray())
@@ -294,6 +331,7 @@ class Mp4MetadataAccessor(
         /** Seconds between 1904-01-01 and 1970-01-01. */
         const val EPOCH_1904_OFFSET = 2_082_844_800L
         const val XYZ = "©xyz"
+        const val LOCI = "loci"
         const val APPLE_LOCATION_KEY = "com.apple.quicktime.location.ISO6709"
         /** Packed ISO 639-2 code "und", as Android writes it. */
         private const val LANGUAGE_UND = 0x15C7
