@@ -37,6 +37,7 @@ import com.noworrieshq.restamp.core.MetadataEngine
 import com.noworrieshq.restamp.core.match.MediaFile
 import com.noworrieshq.restamp.core.model.DateTaken
 import com.noworrieshq.restamp.core.model.MediaMetadata
+import com.noworrieshq.restamp.core.model.MediaType
 import com.noworrieshq.restamp.core.model.MetadataField
 import com.noworrieshq.restamp.core.model.MetadataUpdate
 import com.noworrieshq.restamp.core.plan.CopyPlan
@@ -119,6 +120,12 @@ fun FileDetailScreen(vm: MatchViewModel, targetId: String, onBack: () -> Unit) {
                         }
                     }
                     Notes(sourceReport, targetReport)
+                    Text(
+                        "Dates and locations here are read from inside each file: " +
+                            (if (targetReport.type == MediaType.MP4) "the video's own creation time and location tags" else "the photo's EXIF Date Taken (DateTimeOriginal) and GPS tags") +
+                            ". The phone's file created and modified dates are not used or changed.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
         }

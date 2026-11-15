@@ -210,6 +210,7 @@ private fun Summary(matched: Int, toChoose: Int, noOriginal: Int, unusedOriginal
             if (noOriginal > 0) Text("$noOriginal edited copies have no original")
             Text("$unusedOriginals originals have no edited copy")
             if (skipped > 0) Text("$skipped other files skipped (only JPEG and MP4 are supported)", style = MaterialTheme.typography.bodySmall)
+            Text("Tag badges show the date taken and GPS stored inside each file (EXIF for photos), not file dates.", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
