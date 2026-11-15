@@ -1,0 +1,301 @@
+package com.noworrieshq.restamp.core.mp4
+
+import com.noworrieshq.restamp.core.MalformedMediaException
+import com.noworrieshq.restamp.core.MetadataAccessor
+import com.noworrieshq.restamp.core.OverwriteGuard
+import com.noworrieshq.restamp.core.UnsupportedMediaException
+import com.noworrieshq.restamp.core.WriteResult
+import com.noworrieshq.restamp.core.io.RandomAccessIo
+import com.noworrieshq.restamp.core.model.DateTaken
+import com.noworrieshq.restamp.core.model.GeoLocation
+import com.noworrieshq.restamp.core.model.MediaMetadata
+import com.noworrieshq.restamp.core.model.MetadataField
+import com.noworrieshq.restamp.core.model.MetadataUpdate
+import com.noworrieshq.restamp.core.mp4.BoxParser.u16
+import com.noworrieshq.restamp.core.mp4.BoxParser.u32
+import com.noworrieshq.restamp.core.mp4.BoxParser.u64
+import java.time.Instant
+import java.time.ZoneId
+
+/**
+ * Date taken and GPS for MP4 / QuickTime files.
+ *
+ * - Date taken is the creation time in `mvhd` (and, when writing, every `tkhd` and `mdhd`),
+ *   stored as seconds since 1904-01-01 UTC.
+ * - Location is the `©xyz` ISO 6709 string in `moov/udta`, which is what Pixel phones and
+ *   Android's MediaMuxer write and what Google Photos reads. The QuickTime
+ *   `com.apple.quicktime.location.ISO6709` key is read as a fallback.
+ *
+ * Writes never move media data. Small edits happen in place. When `moov` has to grow, it is
+ * rewritten into adjacent `free` space when there is room, or else appended at the end of the
+ * file with the old copy turned into `free`, so sample offsets stay valid.
+ */
+class Mp4MetadataAccessor(
+    private val maxMoovBytes: Int = 64 * 1024 * 1024,
+    /** Used only when a date has no UTC offset (e.g. from a JPEG without OffsetTime tags). */
+    private val assumedZone: () -> ZoneId = { ZoneId.systemDefault() },
+) : MetadataAccessor {
+
+    override fun read(io: RandomAccessIo): MediaMetadata = parse(io).metadata
+
+    override fun write(
+        io: RandomAccessIo,
+        update: MetadataUpdate,
+        confirmedOverwrites: Set<MetadataField>,
+    ): WriteResult {
+        val file = parse(io)
+        val (effective, result) = OverwriteGuard.effectiveUpdate(file.metadata, update, confirmedOverwrites)
+        if (effective.isEmpty) return result
+
+        val moov = file.moovBytes.copyOf()
+        effective.dateTaken?.let { setCreationTime(moov, file.timeBoxes, it) }
+
+        val location = effective.location
+        if (location == null) {
+            io.write(file.moov.offset, moov)
+        } else {
+            val newXyz = xyzBox(location)
+            val slot = file.xyzSlot
+            if (slot != null && slot.size.toInt() == newXyz.size) {
+                newXyz.copyInto(moov, slot.offset.toInt())
+                io.write(file.moov.offset, moov)
+            } else {
+                writeGrownMoov(io, file, rebuildWithLocation(moov, file, newXyz))
+            }
+        }
+        io.sync()
+        return result
+    }
+
+    // ---- Parsing ----------------------------------------------------------------------
+
+    private class ParsedFile(
+        val topLevel: List<Box>,
+        val moov: Box,
+        val moovBytes: ByteArray,
+        /** Boxes inside [moovBytes] whose creation/modification times hold the date. */
+        val timeBoxes: List<Box>,
+        val udta: Box?,
+        /** The existing `©xyz` box, or a blanked placeholder where one used to be. */
+        val xyzSlot: Box?,
+        val metadata: MediaMetadata,
+    )
+
+    private fun parse(io: RandomAccessIo): ParsedFile {
+        val top = BoxParser.topLevel(io)
+        val ftyp = top.firstOrNull()
+        if (ftyp == null || ftyp.type != "ftyp") throw UnsupportedMediaException("Not an MP4 file (no ftyp box)")
+        val moov = top.firstOrNull { it.type == "moov" } ?: throw MalformedMediaException("No moov box; file may be incomplete")
+        if (moov.size > maxMoovBytes) throw UnsupportedMediaException("moov box is too large (${moov.size} bytes)")
+        val buf = io.read(moov.offset, moov.size.toInt())
+        val inner = BoxParser.children(buf, moov.headerSize, buf.size)
+
+        val mvhd = inner.firstOrNull { it.type == "mvhd" } ?: throw MalformedMediaException("No mvhd box")
+        val timeBoxes = mutableListOf(mvhd)
+        for (trak in inner.filter { it.type == "trak" }) {
+            val trakKids = kids(buf, trak)
+            trakKids.firstOrNull { it.type == "tkhd" }?.let { timeBoxes += it }
+            trakKids.firstOrNull { it.type == "mdia" }?.let { mdia ->
+                kids(buf, mdia).firstOrNull { it.type == "mdhd" }?.let { timeBoxes += it }
+            }
+        }
+
+        val created = readCreationTime(buf, mvhd)
+        val dateTaken = created?.let { DateTaken.ofInstant(it) }
+
+        val udta = inner.firstOrNull { it.type == "udta" }
+        var xyzSlot: Box? = null
+        var location: GeoLocation? = null
+        var redacted = false
+        if (udta != null) {
+            for (child in kids(buf, udta)) {
+                if (child.type == XYZ) {
+                    xyzSlot = child
+                    location = parseXyz(buf, child)
+                    if (location == null && isAllZero(buf, child.payloadOffset.toInt(), child.end.toInt())) redacted = true
+                    break
+                }
+                if (isRedactedPlaceholder(buf, child)) {
+                    xyzSlot = child
+                    redacted = true
+                }
+            }
+        }
+        if (location == null) {
+            location = inner.firstOrNull { it.type == "meta" }?.let { readKeysLocation(buf, it) }
+        }
+        if (location != null) redacted = false
+
+        return ParsedFile(top, moov, buf, timeBoxes, udta, xyzSlot, MediaMetadata(dateTaken, location, redacted))
+    }
+
+    private fun kids(buf: ByteArray, parent: Box): List<Box> =
+        BoxParser.children(buf, parent.payloadOffset.toInt(), parent.end.toInt())
+
+    private fun readCreationTime(buf: ByteArray, box: Box): Instant? {
+        val p = box.payloadOffset.toInt()
+        val seconds = if (buf[p].toInt() == 1) u64(buf, p + 4) else u32(buf, p + 4)
+        if (seconds == 0L) return null
+        return Instant.ofEpochSecond(seconds - EPOCH_1904_OFFSET)
+    }
+
+    /** QuickTime user-data text: 16-bit length, 16-bit language, then the string. */
+    private fun parseXyz(buf: ByteArray, box: Box): GeoLocation? {
+        val p = box.payloadOffset.toInt()
+        if (box.end - p < 4) return null
+        val len = u16(buf, p)
+        val textEnd = minOf(p + 4 + len, box.end.toInt())
+        return Iso6709.parse(String(buf, p + 4, textEnd - p - 4, Charsets.UTF_8))
+    }
+
+    /**
+     * Android's location redaction zeroes the whole `©xyz` box, type included, but keeps its
+     * size. A zero-typed, all-zero box inside `udta` is treated as that placeholder.
+     */
+    private fun isRedactedPlaceholder(buf: ByteArray, box: Box): Boolean =
+        box.headerSize == 8 && box.type == "\u0000\u0000\u0000\u0000" &&
+            isAllZero(buf, box.payloadOffset.toInt(), box.end.toInt())
+
+    private fun isAllZero(buf: ByteArray, from: Int, to: Int): Boolean {
+        for (i in from until to) if (buf[i] != 0.toByte()) return false
+        return true
+    }
+
+    /** Reads `com.apple.quicktime.location.ISO6709` from a QuickTime `meta`/`keys`/`ilst`. */
+    private fun readKeysLocation(buf: ByteArray, meta: Box): GeoLocation? {
+        val p = meta.payloadOffset.toInt()
+        // QuickTime meta has no version/flags; ISO meta has 4 bytes of them first.
+        val start = if (meta.end - p >= 8 && BoxParser.fourCc(buf, p + 4) == "hdlr") p else p + 4
+        val children = BoxParser.children(buf, start, meta.end.toInt())
+        val keys = children.firstOrNull { it.type == "keys" } ?: return null
+        val ilst = children.firstOrNull { it.type == "ilst" } ?: return null
+
+        var k = keys.payloadOffset.toInt() + 4
+        val count = u32(buf, k).toInt(); k += 4
+        var locationIndex = -1
+        for (i in 1..count) {
+            if (k + 8 > keys.end) break
+            val size = u32(buf, k).toInt()
+            if (size < 8) break
+            val name = String(buf, k + 8, size - 8, Charsets.UTF_8)
+            if (name == APPLE_LOCATION_KEY) locationIndex = i
+            k += size
+        }
+        if (locationIndex < 0) return null
+
+        for (item in kids(buf, ilst)) {
+            if (u32(buf, item.offset.toInt() + 4).toInt() != locationIndex) continue
+            val data = kids(buf, item).firstOrNull { it.type == "data" } ?: return null
+            val valueStart = data.payloadOffset.toInt() + 8
+            return Iso6709.parse(String(buf, valueStart, data.end.toInt() - valueStart, Charsets.UTF_8))
+        }
+        return null
+    }
+
+    // ---- Writing ----------------------------------------------------------------------
+
+    private fun setCreationTime(buf: ByteArray, boxes: List<Box>, date: DateTaken) {
+        val instant = date.toInstant(assumedZone())
+        val seconds = instant.epochSecond + EPOCH_1904_OFFSET
+        require(seconds > 0) { "Dates before 1904 can't be stored in MP4" }
+        for (box in boxes) {
+            val p = box.payloadOffset.toInt()
+            if (buf[p].toInt() == 1) {
+                BoxParser.putU64(buf, p + 4, seconds)
+                BoxParser.putU64(buf, p + 12, seconds)
+            } else {
+                if (seconds > 0xFFFFFFFFL) throw UnsupportedMediaException("Date is too late for this file's 32-bit time fields")
+                BoxParser.putU32(buf, p + 4, seconds)
+                BoxParser.putU32(buf, p + 8, seconds)
+            }
+        }
+    }
+
+    private fun xyzBox(location: GeoLocation): ByteArray {
+        val text = Iso6709.format(location).toByteArray(Charsets.UTF_8)
+        val payload = ByteArray(4 + text.size)
+        payload[0] = (text.size ushr 8).toByte(); payload[1] = text.size.toByte()
+        payload[2] = (LANGUAGE_UND ushr 8).toByte(); payload[3] = LANGUAGE_UND.toByte()
+        text.copyInto(payload, 4)
+        return BoxParser.box(XYZ, payload)
+    }
+
+    /** Returns a new `moov` whose `udta` holds [newXyz] in place of any old `©xyz` or placeholder. */
+    private fun rebuildWithLocation(moov: ByteArray, file: ParsedFile, newXyz: ByteArray): ByteArray {
+        val udta = file.udta
+        val newUdta: ByteArray
+        val before: Int
+        val after: Int
+        if (udta == null) {
+            newUdta = BoxParser.box("udta", newXyz)
+            before = moov.size
+            after = moov.size
+        } else {
+            val payload = java.io.ByteArrayOutputStream()
+            payload.write(newXyz)
+            for (child in kids(moov, udta)) {
+                if (child.type == XYZ || isRedactedPlaceholder(moov, child)) continue
+                payload.write(moov, child.offset.toInt(), child.size.toInt())
+            }
+            newUdta = BoxParser.box("udta", payload.toByteArray())
+            before = udta.offset.toInt()
+            after = udta.end.toInt()
+        }
+        val out = java.io.ByteArrayOutputStream()
+        val header = moov.copyOfRange(0, file.moov.headerSize)
+        out.write(header)
+        out.write(moov, file.moov.headerSize, before - file.moov.headerSize)
+        out.write(newUdta)
+        out.write(moov, after, moov.size - after)
+        val result = out.toByteArray()
+        if (file.moov.headerSize == 16) BoxParser.putU64(result, 8, result.size.toLong())
+        else BoxParser.putU32(result, 0, result.size.toLong())
+        return result
+    }
+
+    private fun writeGrownMoov(io: RandomAccessIo, file: ParsedFile, newMoov: ByteArray) {
+        val moov = file.moov
+        val index = file.topLevel.indexOf(moov)
+        val next = file.topLevel.getOrNull(index + 1)
+        val followingFree = next?.takeIf { (it.type == "free" || it.type == "skip") && !it.extendsToEof }
+        val available = moov.size + (followingFree?.size ?: 0L)
+        val remainder = available - newMoov.size
+
+        // 1. Fits in the old moov plus any free box right after it.
+        if (remainder == 0L || remainder >= 8) {
+            io.write(moov.offset, newMoov)
+            if (remainder > 0) io.write(moov.offset + newMoov.size, BoxParser.freeBox(remainder.toInt()))
+            return
+        }
+        // 2. moov is the last box: rewrite it and fix the file length.
+        if (next == null) {
+            io.write(moov.offset, newMoov)
+            io.truncate(moov.offset + newMoov.size)
+            return
+        }
+        // 3. Append a new moov at the end and retire the old one as free space.
+        if (file.topLevel.any { it.type == "moof" }) {
+            throw UnsupportedMediaException("Fragmented MP4 needs a full rewrite to add a location; not supported yet")
+        }
+        val last = file.topLevel.last()
+        if (last.extendsToEof) {
+            if (last.size > 0xFFFFFFFFL) throw UnsupportedMediaException("Can't make room after an open-ended box over 4 GB")
+            val sizeField = ByteArray(4).also { BoxParser.putU32(it, 0, last.size) }
+            io.write(last.offset, sizeField)
+        }
+        val end = io.size
+        io.write(end, newMoov)
+        io.sync()
+        // Only after the new copy is safely on disk does the old one stop being "moov".
+        io.write(moov.offset + 4, "free".toByteArray(Charsets.ISO_8859_1))
+    }
+
+    companion object {
+        /** Seconds between 1904-01-01 and 1970-01-01. */
+        const val EPOCH_1904_OFFSET = 2_082_844_800L
+        const val XYZ = "©xyz"
+        const val APPLE_LOCATION_KEY = "com.apple.quicktime.location.ISO6709"
+        /** Packed ISO 639-2 code "und", as Android writes it. */
+        private const val LANGUAGE_UND = 0x15C7
+    }
+}

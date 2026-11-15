@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
+
+      # The SDK repository's package name for API 37 isn't guaranteed to be plain
+      # "android-37" (minor-version suffixes exist), so pick whatever it publishes.
+      - name: Install Android 17 (API 37) SDK platform
+        run: |
+          sdkmanager --list 2>/dev/null | grep -E "platforms;android-3[6-9]" | sort -u || true
+          PKG=$(sdkmanager --list 2>/dev/null | grep -oE "platforms;android-37[^ |]*" | sort -u | head -n 1)
+          if [ -z "$PKG" ]; then echo "No API 37 platform package found"; exit 1; fi
+          echo "Installing $PKG"
+          yes | sdkmanager "$PKG" "build-tools;36.0.0" > /dev/null
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests (engine + JPEG via Robolectric)
+        run: ./gradlew :core:test :app:testDebugUnitTest --stacktrace
+
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: restamp-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: "**/build/reports/tests/"
