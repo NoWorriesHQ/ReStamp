@@ -1,0 +1,76 @@
+# ReStamp
+
+An Android app that puts the **date taken** and **GPS location** back into photos and videos
+after another app's editor stripped them, by copying the tags from the original file.
+
+Built for Google Pixel files (JPEG and MP4) on Android 17, and kept Play Store compatible.
+
+## Status
+
+Step 1 of 4: project setup and the metadata engine.
+
+| Step | What | State |
+|---|---|---|
+| 1 | Metadata engine for JPEG + MP4 | ✅ this PR |
+| 2 | Match originals to edited copies across folders | next |
+| 3 | Comparison and editing screens (bulk copy, manual date, map/city picker) | |
+| 4 | Undo/backup, privacy policy, billing, signed release | |
+
+## Stack
+
+Kotlin + Jetpack Compose, Google's recommended toolkit, so it tracks new Android versions
+best. The project is split into two modules:
+
+- **`core`**: plain Kotlin with no Android dependency. Holds the data model, the
+  "never overwrite without confirmation" rule, the copy plan used by the UI, and a
+  hand-written MP4 metadata reader/writer (Android has no API for editing video tags).
+  Its tests run on any machine in seconds.
+- **`app`**: the Android app. Uses AndroidX ExifInterface for JPEG, opens files via the
+  system picker, and has a simple test screen for the engine.
+
+## How the engine handles each format
+
+**JPEG**: `DateTimeOriginal` / `OffsetTimeOriginal` / `SubSecTimeOriginal` (and the
+`Digitized` copies), plus the standard GPS tags, through ExifInterface. Writes go through a
+temp copy so the file is exact even when the EXIF block changes size.
+
+**MP4**: date taken is the creation time in `mvhd` (also written into every `tkhd` and
+`mdhd`, like the camera does). Location is the `©xyz` ISO 6709 tag in `moov/udta`, which is
+what Pixel and Android's MediaMuxer write and what Google Photos reads. Media data is never
+moved or rewritten:
+
+1. If the tag fits in place, it is written in place.
+2. Otherwise `moov` is rebuilt into free space right after it, or rewritten if it's the last box.
+3. Otherwise the new `moov` is appended at the end and the old one becomes a `free` box.
+   The new copy is synced to disk before the old one is retired, so a crash can't leave
+   the file without metadata.
+
+## Things learned from real Pixel files
+
+- **Android blanks out GPS** in files read by apps without `ACCESS_MEDIA_LOCATION`. It
+  zeroes the `©xyz` box but keeps its size. The engine reports this as
+  `locationRedacted`, requests the permission, and asks MediaStore for the original. Sharing a
+  file from a phone app can produce such a blanked copy, so send test samples zipped.
+- **Edited clips keep a creation time, but it's the edit time.** So copying the date onto an
+  edited copy always counts as an overwrite and asks for confirmation.
+- **Pixel originals are signed** with C2PA Content Credentials. The engine flags this
+  (`hasContentCredentials`), since editing a signed file breaks its signature. The app only
+  writes to edited copies.
+
+## Building
+
+Needs JDK 17+ and the Android SDK (platform 37).
+
+```sh
+./gradlew :core:test                 # engine tests, no Android SDK needed for this module's code
+./gradlew :app:testDebugUnitTest     # JPEG tests (Robolectric)
+./gradlew :app:assembleDebug         # APK in app/build/outputs/apk/debug/
+```
+
+To run the engine against your own phone files (they stay out of the repo):
+
+```sh
+RESTAMP_SAMPLES=/path/to/samples ./gradlew :core:test
+```
+
+CI builds the debug APK on every push and attaches it to the run.
