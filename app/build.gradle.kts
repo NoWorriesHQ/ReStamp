@@ -17,7 +17,22 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        // A fixed debug key, so each CI test build installs over the previous one. Every CI run
+        // otherwise makes its own random debug key and Android refuses the update. This key is
+        // only for test builds; the Play release gets its own private key in step 4.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
