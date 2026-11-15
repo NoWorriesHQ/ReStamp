@@ -60,8 +60,11 @@ jobs:
       - name: Sample file results
         if: always()
         run: |
+          echo "Sample videos: $(find "$RUNNER_TEMP/mei" -type f \( -name '*.mp4' -o -name '*.mov' -o -name '*.3gp' -o -name '*.m4v' \) | wc -l), sample photos: $(find "$RUNNER_TEMP/mei/jpg" "$RUNNER_TEMP/uhdr/tests/data" -maxdepth 1 -type f -iname '*.jp*g' | wc -l)"
           for f in core/build/test-results/test/TEST-*CorpusTest.xml app/build/test-results/testDebugUnitTest/TEST-*CorpusTest.xml; do
-            [ -f "$f" ] && grep -hoE '(OK|REFUSED|FAILED) +[^&<]*' "$f" | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || true
+            [ -f "$f" ] || continue
+            grep -o 'tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*"' "$f" | head -1 | sed "s|^|$(basename "$f"): |"
+            grep -hoE '(OK|REFUSED|FAILED) +[^&<]*' "$f" | tee -a "$GITHUB_STEP_SUMMARY" || true
           done
 
       - name: Build debug APK
