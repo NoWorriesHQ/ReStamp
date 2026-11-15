@@ -1,5 +1,24 @@
 package com.noworrieshq.restamp.ui
 
+import android.net.Uri
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import com.noworrieshq.restamp.core.match.MediaKind
+import com.noworrieshq.restamp.media.FileExtras
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.time.format.DateTimeFormatter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -91,7 +110,11 @@ fun FileDetailScreen(vm: MatchViewModel, targetId: String, onBack: () -> Unit) {
         ) {
             TextButton(onClick = onBack) { Text("‹ Back to list") }
             Text(target.name, style = MaterialTheme.typography.titleLarge)
-            Text(if (source != null) "Original: ${source.name}" else "No original paired. You can still set the tags by hand.", style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                FilePreview("Original", source, Modifier.weight(1f))
+                FilePreview("Edited copy", target, Modifier.weight(1f))
+            }
+            if (source == null) Text("No original paired. You can still set the tags by hand.", style = MaterialTheme.typography.bodyMedium)
 
             when {
                 targetReport == null -> FileTagBadges(tags[target])
@@ -169,7 +192,7 @@ private fun FieldCard(
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row {
-                Text(field.fieldName().replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text(if (field == MetadataField.DATE_TAKEN) "Date taken (inside the file)" else "Location (inside the file)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 when (status) {
                     FieldStatus.ALREADY_SAME -> TagBadge("matches", TagLook.PRESENT)
                     FieldStatus.WILL_ADD -> TagBadge("missing", TagLook.MISSING)
@@ -287,3 +310,47 @@ fun DateTimeDialog(initial: DateTaken?, onDismiss: () -> Unit, onPicked: (DateTa
         )
     }
 }
+
+/**
+ * Thumbnail, name and the phone's own "modified" date, which is shown for comparison only.
+ * It's a property of the file on the phone, not a tag inside it, and ReStamp never changes it.
+ */
+@Composable
+private fun FilePreview(label: String, file: MediaFile?, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val extras = remember { FileExtras(context.applicationContext) }
+    val thumb by produceState<ImageBitmap?>(null, file?.id) {
+        value = file?.let { f ->
+            withContext(Dispatchers.IO) {
+                extras.thumbnail(Uri.parse(f.id), f.parsed.kind == MediaKind.VIDEO, 512)?.asImageBitmap()
+            }
+        }
+    }
+    val info by produceState<FileExtras.Info?>(null, file?.id) {
+        value = file?.let { f -> withContext(Dispatchers.IO) { extras.info(Uri.parse(f.id)) } }
+    }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            val t = thumb
+            when {
+                file == null -> Text("None", style = MaterialTheme.typography.bodySmall)
+                t != null -> Image(t, contentDescription = file.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                else -> Text("No preview", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        if (file != null) {
+            Text(file.name, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                "File modified on phone: " + (info?.modified?.atZone(ZoneId.systemDefault())?.format(FILE_DATE_FORMAT) ?: "unknown"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private val FILE_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm")
