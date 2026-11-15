@@ -79,7 +79,7 @@ fun MatchScreen(vm: MatchViewModel, onOpenEngineCheck: () -> Unit) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Include subfolders", Modifier.weight(1f))
-                    Switch(checked = vm.includeSubfolders, onCheckedChange = vm::setIncludeSubfolders)
+                    Switch(checked = vm.includeSubfolders, onCheckedChange = vm::changeIncludeSubfolders)
                 }
             }
             if (vm.scanning) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }

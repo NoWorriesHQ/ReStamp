@@ -54,7 +54,7 @@ class MatchViewModel(app: Application) : AndroidViewModel(app) {
         rescan()
     }
 
-    fun setIncludeSubfolders(on: Boolean) {
+    fun changeIncludeSubfolders(on: Boolean) {
         includeSubfolders = on
         prefs.edit().putBoolean(KEY_SUBFOLDERS, on).apply()
         rescan()
