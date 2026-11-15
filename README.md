@@ -7,13 +7,13 @@ Built for Google Pixel files (JPEG and MP4) on Android 17, and kept Play Store c
 
 ## Status
 
-Step 1 of 4: project setup and the metadata engine.
+Step 2 of 4: matching originals to edited copies.
 
 | Step | What | State |
 |---|---|---|
-| 1 | Metadata engine for JPEG + MP4 | ✅ this PR |
-| 2 | Match originals to edited copies across folders | next |
-| 3 | Comparison and editing screens (bulk copy, manual date, map/city picker) | |
+| 1 | Metadata engine for JPEG + MP4 | ✅ |
+| 2 | Match originals to edited copies across folders | ✅ this PR |
+| 3 | Comparison and editing screens (bulk copy, manual date, map/city picker) | next |
 | 4 | Undo/backup, privacy policy, billing, signed release | |
 
 ## Stack
@@ -44,6 +44,29 @@ moved or rewritten:
 3. Otherwise the new `moov` is appended at the end and the old one becomes a `free` box.
    The new copy is synced to disk before the old one is retired, so a crash can't leave
    the file without metadata.
+
+## How files are matched
+
+Pick an **originals** folder and an **edited copies** folder (they can be the same folder,
+which is how Google Photos saves edits in `DCIM/Camera`). Each edited copy is paired with at most
+one original; one original can feed several edited copies. In order of strength:
+
+1. **Same name**, ignoring case and `.jpg`/`.jpeg` differences.
+2. **Same name once edit suffixes are removed**, one at a time: `-edited`, `_edit`, `~2`, ` (1)`,
+   `-01`, `_exported_…`, `Copy of …`, and similar. Pixel's own shot tags (`.MP`, `.NIGHT`,
+   `.PORTRAIT`, `.RAW-01.COVER`, `.TS`) are not edits and are ignored. The longest shared name
+   wins, so `Holiday 2-edited` goes to `Holiday 2`, not `Holiday 3`.
+3. **Same camera timestamp**: `PXL_20241005_143012345` encodes the capture time (UTC on Pixel), so
+   unknown editor suffixes still match. Names that agree only to the second are marked
+   "check".
+
+Photos only pair with photos and videos with videos. When two originals fit equally well the app
+asks; ties prefer the same file type (a `.jpg` original over a `.dng`). An original never pairs
+with a file that looks less edited than itself, so in a shared folder originals stay originals.
+
+The person can unpair any match, pair any edited copy by hand (closest names are suggested
+first), and go back to automatic matching. Manual choices always win. The logic is in
+`core/match` and has no Android dependency.
 
 ## Things learned from real Pixel files
 
