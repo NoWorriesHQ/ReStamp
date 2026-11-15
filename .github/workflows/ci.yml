@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # to publish the test APK as a pre-release
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +45,28 @@ jobs:
         with:
           name: restamp-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+
+      # Run artifacts are zipped and hidden in the GitHub mobile app, so each PR also gets a
+      # pre-release with the plain .apk, which a phone can download and install directly.
+      - name: Publish test APK as a pre-release
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          TAG="test-pr-$PR"
+          APK="restamp-pr$PR-debug.apk"
+          cp app/build/outputs/apk/debug/*.apk "$APK"
+          NOTES="Debug test build of PR #$PR at commit ${SHA:0:7}. For testing only: back up your photos first."
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber
+            gh release edit "$TAG" --notes "$NOTES"
+          else
+            gh release create "$TAG" "$APK" --prerelease --target "$SHA" --title "Test build: PR #$PR" --notes "$NOTES"
+          fi
+          echo "APK: https://github.com/$GH_REPO/releases/download/$TAG/$APK" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: always()
