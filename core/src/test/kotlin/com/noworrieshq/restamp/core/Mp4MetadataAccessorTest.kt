@@ -47,7 +47,7 @@ class Mp4MetadataAccessorTest {
         val m = read(f)
         assertEquals(captured, m.dateTaken!!.instant)
         assertEquals(-33.8568, m.location!!.latitude, 1e-9)
-        assertEquals(151.2153, m.location!!.longitude, 1e-9)
+        assertEquals(151.2153, m.location.longitude, 1e-9)
         assertFalse(m.locationRedacted)
     }
 
