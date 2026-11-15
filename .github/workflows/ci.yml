@@ -35,6 +35,10 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # ffprobe/ffmpeg independently check the videos the engine writes (Mp4FormatMatrixTest).
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg > /dev/null
+
       - name: Unit tests (engine + JPEG via Robolectric)
         run: ./gradlew :core:test :app:testDebugUnitTest --stacktrace
 
