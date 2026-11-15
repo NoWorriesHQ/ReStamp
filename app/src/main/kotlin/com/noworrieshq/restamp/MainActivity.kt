@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import com.noworrieshq.restamp.media.MediaFiles
 import com.noworrieshq.restamp.ui.EngineCheckScreen
+import com.noworrieshq.restamp.ui.FileDetailScreen
 import com.noworrieshq.restamp.ui.MatchScreen
 import com.noworrieshq.restamp.ui.MatchViewModel
 import com.noworrieshq.restamp.ui.ReStampTheme
@@ -33,11 +34,21 @@ class MainActivity : ComponentActivity() {
         setContent {
             ReStampTheme {
                 var engineCheck by rememberSaveable { mutableStateOf(false) }
-                if (engineCheck) {
-                    BackHandler { engineCheck = false }
-                    EngineCheckScreen(files)
-                } else {
-                    MatchScreen(matches, onOpenEngineCheck = { engineCheck = true })
+                var openFile by rememberSaveable { mutableStateOf<String?>(null) }
+                when {
+                    engineCheck -> {
+                        BackHandler { engineCheck = false }
+                        EngineCheckScreen(files)
+                    }
+                    openFile != null -> {
+                        BackHandler { openFile = null }
+                        FileDetailScreen(matches, openFile!!, onBack = { openFile = null })
+                    }
+                    else -> MatchScreen(
+                        matches,
+                        onOpenFile = { openFile = it.id },
+                        onOpenEngineCheck = { engineCheck = true },
+                    )
                 }
             }
         }

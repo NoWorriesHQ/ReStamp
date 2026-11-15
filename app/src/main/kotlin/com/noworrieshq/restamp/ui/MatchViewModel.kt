@@ -13,6 +13,7 @@ import com.noworrieshq.restamp.core.match.ManualChoices
 import com.noworrieshq.restamp.core.match.MatchResult
 import com.noworrieshq.restamp.core.match.MediaFile
 import com.noworrieshq.restamp.media.FolderScanner
+import com.noworrieshq.restamp.media.MediaFiles
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -32,6 +33,31 @@ class MatchViewModel(app: Application) : AndroidViewModel(app) {
     var result by mutableStateOf<MatchResult?>(null); private set
     var scanning by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
+
+    /** Tags of the listed files, and writing into the edited copies. */
+    val tags = TagStore(MediaFiles(app), viewModelScope)
+
+    /** Matched edited copies the person left out of the next bulk copy. */
+    var excluded by mutableStateOf(emptySet<String>()); private set
+
+    fun setIncluded(target: MediaFile, included: Boolean) {
+        excluded = if (included) excluded - target.id else excluded + target.id
+    }
+
+    fun includeAll(included: Boolean) {
+        excluded = if (included) emptySet() else result?.pairs?.mapTo(HashSet()) { it.target.id }.orEmpty()
+    }
+
+    /** Pairs ticked for the next bulk copy. */
+    val selectedPairs get() = result?.pairs?.filter { it.target.id !in excluded }.orEmpty()
+
+    /** Looks up an edited copy by id, with its original when it has one. */
+    fun findTarget(id: String): Pair<MediaFile, MediaFile?>? {
+        val r = result ?: return null
+        r.pairFor(id)?.let { return it.target to it.source }
+        val t = r.ambiguous.firstOrNull { it.target.id == id }?.target ?: r.unmatchedTargets.firstOrNull { it.id == id }
+        return t?.let { it to null }
+    }
 
     init {
         // Reopen the folders picked last time, if the app still has access.
@@ -84,6 +110,8 @@ class MatchViewModel(app: Application) : AndroidViewModel(app) {
                 targets = t.files
                 skipped = if (target == source) s.skipped else s.skipped + t.skipped
                 result = r
+                tags.clear()
+                loadTags(r)
             }.onFailure {
                 error = "Couldn't read the folders: ${it.message}"
             }
@@ -94,7 +122,13 @@ class MatchViewModel(app: Application) : AndroidViewModel(app) {
     private fun updateManual(choices: ManualChoices) {
         manual = choices
         // Matching is quick (thousands of names in well under a second), so redo it in place.
-        result = FileMatcher.match(sources, targets, choices)
+        result = FileMatcher.match(sources, targets, choices).also(::loadTags)
+    }
+
+    private fun loadTags(r: MatchResult) {
+        // Edited copies first, since those are what the list shows statuses for.
+        tags.ensureLoaded(r.pairs.map { it.target } + r.unmatchedTargets + r.ambiguous.map { it.target })
+        tags.ensureLoaded(r.pairs.map { it.source }.distinctBy { it.id })
     }
 
     private companion object {

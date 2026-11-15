@@ -2,6 +2,7 @@ package com.noworrieshq.restamp.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,7 +17,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -47,10 +49,11 @@ import com.noworrieshq.restamp.media.FolderScanner
  * pair up. Pairs can be undone or made by hand. Copying the tags comes in step 3.
  */
 @Composable
-fun MatchScreen(vm: MatchViewModel, onOpenEngineCheck: () -> Unit) {
+fun MatchScreen(vm: MatchViewModel, onOpenFile: (MediaFile) -> Unit, onOpenEngineCheck: () -> Unit) {
     val pickSource = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { it?.let(vm::pickSource) }
     val pickTarget = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { it?.let(vm::pickTarget) }
     var choosingFor by remember { mutableStateOf<MediaFile?>(null) }
+    var bulkCopying by remember { mutableStateOf(false) }
     val result = vm.result
 
     Scaffold { padding ->
@@ -111,13 +114,20 @@ fun MatchScreen(vm: MatchViewModel, onOpenEngineCheck: () -> Unit) {
                 section("Edited copies with no original", result.unmatchedTargets.size)
                 items(result.unmatchedTargets, key = { "u" + it.id }) { t ->
                     FileRow(t.name, if (t.id in vm.manual.unpaired) "You unpaired this" else "No original found") {
-                        TextButton(onClick = { choosingFor = t }) { Text("Pick original") }
-                        if (t.id in vm.manual.unpaired) TextButton(onClick = { vm.resetToAutomatic(t) }) { Text("Match automatically") }
+                        FileTagBadges(vm.tags[t])
+                        Row {
+                            TextButton(onClick = { choosingFor = t }) { Text("Pick original") }
+                            TextButton(onClick = { onOpenFile(t) }) { Text("Set by hand") }
+                            if (t.id in vm.manual.unpaired) TextButton(onClick = { vm.resetToAutomatic(t) }) { Text("Auto") }
+                        }
                     }
                 }
 
                 section("Matched", result.pairs.size)
-                items(result.pairs, key = { "p" + it.target.id }) { p -> PairRow(p, vm) { choosingFor = p.target } }
+                if (result.pairs.isNotEmpty()) item(key = "bulk") { BulkBar(vm) { bulkCopying = true } }
+                items(result.pairs, key = { "p" + it.target.id }) { p ->
+                    PairRow(p, vm, onOpen = { onOpenFile(p.target) }, onChange = { choosingFor = p.target })
+                }
 
                 section("Originals with no edited copy", result.unmatchedSources.size)
                 items(result.unmatchedSources, key = { "s" + it.id }) { s ->
@@ -132,6 +142,28 @@ fun MatchScreen(vm: MatchViewModel, onOpenEngineCheck: () -> Unit) {
                 TextButton(onClick = onOpenEngineCheck) { Text("Test one pair of files") }
             }
         }
+    }
+
+    if (bulkCopying) {
+        val selected = vm.selectedPairs
+        val batch = vm.tags.batch(selected)
+        BulkCopyDialog(
+            batch = batch,
+            stillReading = selected.size - batch.items.size,
+            onDismiss = { bulkCopying = false },
+            onRun = { jobs ->
+                bulkCopying = false
+                vm.tags.run(jobs, selected.associate { it.target.id to it.target.name })
+            },
+        )
+    }
+
+    vm.tags.lastMessage?.let { msg ->
+        AlertDialog(
+            onDismissRequest = vm.tags::dismissMessage,
+            text = { Text(msg) },
+            confirmButton = { TextButton(onClick = vm.tags::dismissMessage) { Text("OK") } },
+        )
     }
 
     choosingFor?.let { target ->
@@ -194,19 +226,44 @@ private fun FileRow(name: String, detail: String, actions: @Composable () -> Uni
 }
 
 @Composable
-private fun PairRow(pair: FilePair, vm: MatchViewModel, onChange: () -> Unit) {
+private fun BulkBar(vm: MatchViewModel, onCopy: () -> Unit) {
+    val pairs = vm.result?.pairs.orEmpty()
+    val selected = vm.selectedPairs.size
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
-            Text(pair.target.name, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text("from ${pair.source.name}", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                AssistChip(onClick = {}, label = { Text(pair.confidence.label()) })
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onChange) { Text("Change") }
-                if (pair.confidence == MatchConfidence.MANUAL) {
-                    TextButton(onClick = { vm.resetToAutomatic(pair.target) }) { Text("Auto") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = selected == pairs.size,
+                    onCheckedChange = { vm.includeAll(it) },
+                )
+                Text("$selected of ${pairs.size} selected", Modifier.weight(1f))
+                Button(enabled = selected > 0 && vm.tags.batchProgress == null, onClick = onCopy) { Text("Copy tags") }
+            }
+            vm.tags.batchProgress?.let { (done, total) ->
+                LinearProgressIndicator(progress = { done / total.toFloat() }, modifier = Modifier.fillMaxWidth())
+                Text("Updating $done of $total…", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PairRow(pair: FilePair, vm: MatchViewModel, onOpen: () -> Unit, onChange: () -> Unit) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
+        Row(Modifier.padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)) {
+            Checkbox(checked = pair.target.id !in vm.excluded, onCheckedChange = { vm.setIncluded(pair.target, it) })
+            Column(Modifier.weight(1f).padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(pair.target.name, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("from ${pair.source.name}", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                PairTagBadges(vm.tags.planFor(pair), vm.tags[pair.source], vm.tags[pair.target])
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(pair.confidence.label(), style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onChange) { Text("Change") }
+                    if (pair.confidence == MatchConfidence.MANUAL) {
+                        TextButton(onClick = { vm.resetToAutomatic(pair.target) }) { Text("Auto") }
+                    }
+                    TextButton(onClick = { vm.unpair(pair.target) }) { Text("Unpair") }
                 }
-                TextButton(onClick = { vm.unpair(pair.target) }) { Text("Unpair") }
             }
         }
     }
