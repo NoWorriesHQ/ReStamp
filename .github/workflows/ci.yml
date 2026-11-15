@@ -39,8 +39,30 @@ jobs:
       - name: Install ffmpeg
         run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg > /dev/null
 
+      # Real photos and videos from many phones and cameras, from two public collections:
+      # drewnoakes/metadata-extractor-images ("free to use however you wish") and the
+      # Apache-2.0 test data of google/libultrahdr (Ultra HDR / gain map JPEGs).
+      - name: Fetch public sample files
+        run: |
+          set -e
+          git clone -q --depth 1 --filter=blob:none --sparse https://github.com/drewnoakes/metadata-extractor-images "$RUNNER_TEMP/mei"
+          git -C "$RUNNER_TEMP/mei" sparse-checkout set --no-cone '/mp4/*.mp4' '/mov/*.mov' '/3gp/*.3gp' '/m4v/*.m4v' \
+            '/jpg/Google *' '/jpg/Nexus *' '/jpg/Apple iPhone *' '/jpg/Samsung GT-*' '/jpg/Samsung SM-*' \
+            '/jpg/HTC One*' '/jpg/OnePlus*' '/jpg/Motorola *'
+          git clone -q --depth 1 --filter=blob:none --sparse https://github.com/google/libultrahdr "$RUNNER_TEMP/uhdr"
+          git -C "$RUNNER_TEMP/uhdr" sparse-checkout set --no-cone '/tests/data/*.jpg'
+          echo "RESTAMP_VIDEO_CORPUS=$RUNNER_TEMP/mei" >> "$GITHUB_ENV"
+          echo "RESTAMP_JPEG_CORPUS=$RUNNER_TEMP/mei/jpg:$RUNNER_TEMP/uhdr/tests/data" >> "$GITHUB_ENV"
+
       - name: Unit tests (engine + JPEG via Robolectric)
         run: ./gradlew :core:test :app:testDebugUnitTest --stacktrace
+
+      - name: Sample file results
+        if: always()
+        run: |
+          for f in core/build/test-results/test/TEST-*CorpusTest.xml app/build/test-results/testDebugUnitTest/TEST-*CorpusTest.xml; do
+            [ -f "$f" ] && grep -hoE '(OK|REFUSED|FAILED) +[^&<]*' "$f" | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || true
+          done
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug

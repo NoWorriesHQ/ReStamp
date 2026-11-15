@@ -99,6 +99,24 @@ class Mp4FormatMatrixTest {
         roundTrip("tagged.mp4")
     }
 
+    /** Location inside udta/meta/ilst, as Adobe tools and exiftool write it. */
+    @Test fun iTunesStyleLocation() {
+        val f = fixture("itunes-ilst-location.mp4")
+        assertTrue(read(f).location!!.isSamePlaceAs(GeoLocation(51.5007, -0.1246)))
+        roundTrip("itunes-ilst-location.mp4")
+    }
+
+    /** iPhone videos keep location in moov/meta keys (com.apple.quicktime.location.ISO6709). */
+    @Test fun appleKeysLocation() {
+        val f = fixture("apple-keys.mov")
+        assertTrue(read(f).location!!.isSamePlaceAs(paris))
+        roundTrip("apple-keys.mov")
+        // The other Apple tags are kept.
+        assertTrue(String(File(tmp.root, "apple-keys.mov").readBytes(), Charsets.ISO_8859_1).contains("com.apple.quicktime.make"))
+    }
+
+    @Test fun quickTimeWithoutFtyp() = roundTrip("no-ftyp.mov")
+
     @Test fun untaggedFilesReadAsMissing() {
         for (name in listOf("moov-at-end.mp4", "moov-first.mp4", "quicktime.mov", "fragmented.mp4")) {
             val m = read(fixture(name))
@@ -144,7 +162,11 @@ class Mp4FormatMatrixTest {
 object Ffmpeg {
     private val available: Boolean by lazy { runCatching { run("ffprobe", "-version").first == 0 }.getOrDefault(false) }
 
-    fun check(f: File, date: DateTaken, place: GeoLocation) {
+    /**
+     * [original], when given, is the untouched file: decode warnings it already had (some
+     * cameras write odd timestamps) are allowed, as long as tagging added no new ones.
+     */
+    fun check(f: File, date: DateTaken, place: GeoLocation, original: File? = null) {
         if (!available) return
         val (code, out) = run("ffprobe", "-v", "error", "-show_entries", "format_tags=creation_time,location", "-of", "default=nw=1", f.path)
         assertEquals("ffprobe failed on ${f.name}: $out", 0, code)
@@ -154,9 +176,16 @@ object Ffmpeg {
             ?: error("${f.name}: ffprobe sees no location in $tags")
         assertEquals(place.latitude, loc.groupValues[1].toDouble(), 0.0001)
         assertEquals(place.longitude, loc.groupValues[2].toDouble(), 0.0001)
-        val (decode, errors) = run("ffmpeg", "-v", "error", "-i", f.path, "-f", "null", "-")
+        val (decode, errors) = decodeErrors(f)
         assertEquals("${f.name} no longer decodes: $errors", 0, decode)
-        assertTrue("${f.name} decode errors: $errors", errors.isBlank())
+        val allowed = original?.let { decodeErrors(it).second }.orEmpty()
+        assertTrue("${f.name} decode errors: $errors", errors.isBlank() || errors == allowed)
+    }
+
+    /** Exit code and ffmpeg's decode errors, with memory addresses removed so runs compare. */
+    private fun decodeErrors(f: File): Pair<Int, String> {
+        val (code, out) = run("ffmpeg", "-v", "error", "-i", f.path, "-f", "null", "-")
+        return code to out.replace(Regex("0x[0-9a-f]+"), "")
     }
 
     private fun run(vararg cmd: String): Pair<Int, String> {

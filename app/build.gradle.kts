@@ -54,6 +54,11 @@ android {
     }
 }
 
+tasks.withType<Test>().configureEach {
+    // Not a tracked input otherwise, so a cached result could stand in for a run over real photos.
+    inputs.property("jpegCorpus", System.getenv("RESTAMP_JPEG_CORPUS").orEmpty())
+}
+
 dependencies {
     implementation(project(":core"))
     implementation(libs.androidx.exifinterface)
