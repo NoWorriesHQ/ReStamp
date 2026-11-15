@@ -43,7 +43,7 @@ class VideoCorpusTest {
                 check(after.dateTaken?.instant == date.instant) { "date reads back as ${after.dateTaken}" }
                 check(after.location?.isSamePlaceAs(place) == true) { "location reads back as ${after.location}" }
                 Ffmpeg.check(f, date, place, original = source)
-                "tagged (had date=${existing.dateTaken?.instant}, location=${existing.location})"
+                "tagged (had date=${existing.dateTaken?.let { "${it.localDateTime}${it.utcOffset ?: ""}" }}, location=${existing.location})"
             }
             val line = outcome.fold(
                 { "OK       ${source.name}: $it" },

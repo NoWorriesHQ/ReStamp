@@ -52,7 +52,7 @@ class JpegCorpusTest {
                 check(after.location?.isSamePlaceAs(place) == true) { "location reads back as ${after.location}" }
                 val bytes = f.readBytes()
                 check(imageAndTrailer(before).contentEquals(imageAndTrailer(bytes))) { "image data or trailing data changed" }
-                "tagged (had date=${existing.dateTaken?.instant}, location=${existing.location}; ${before.size} -> ${bytes.size} bytes)"
+                "tagged (had date=${existing.dateTaken?.let { "${it.localDateTime}${it.utcOffset ?: ""}" }}, location=${existing.location}; ${before.size} -> ${bytes.size} bytes)"
             }
             val line = outcome.fold(
                 { "OK       ${source.name}: $it" },
