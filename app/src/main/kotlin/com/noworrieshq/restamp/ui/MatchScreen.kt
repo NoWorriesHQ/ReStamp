@@ -49,7 +49,7 @@ import com.noworrieshq.restamp.media.FolderScanner
  * pair up. Pairs can be undone or made by hand. Copying the tags comes in step 3.
  */
 @Composable
-fun MatchScreen(vm: MatchViewModel, onOpenFile: (MediaFile) -> Unit, onOpenEngineCheck: () -> Unit) {
+fun MatchScreen(vm: MatchViewModel, onOpenFile: (MediaFile) -> Unit, onHome: () -> Unit) {
     val pickSource = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { it?.let(vm::pickSource) }
     val pickTarget = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { it?.let(vm::pickTarget) }
     var choosingFor by remember { mutableStateOf<MediaFile?>(null) }
@@ -62,7 +62,8 @@ fun MatchScreen(vm: MatchViewModel, onOpenFile: (MediaFile) -> Unit, onOpenEngin
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            item { Text("Match originals to edited copies", style = MaterialTheme.typography.headlineSmall) }
+            item { TextButton(onClick = onHome) { Text("‹ Home") } }
+            item { Text("Bulk file copy", style = MaterialTheme.typography.headlineSmall) }
             item {
                 FolderCard(
                     title = "Originals",
@@ -137,10 +138,6 @@ fun MatchScreen(vm: MatchViewModel, onOpenFile: (MediaFile) -> Unit, onOpenEngin
                 item { Text("Choose both folders to see how the files pair up.") }
             }
 
-            item {
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                TextButton(onClick = onOpenEngineCheck) { Text("Test one pair of files") }
-            }
         }
     }
 
@@ -155,14 +152,6 @@ fun MatchScreen(vm: MatchViewModel, onOpenFile: (MediaFile) -> Unit, onOpenEngin
                 bulkCopying = false
                 vm.tags.run(jobs, selected.associate { it.target.id to it.target.name })
             },
-        )
-    }
-
-    vm.tags.lastMessage?.let { msg ->
-        AlertDialog(
-            onDismissRequest = vm.tags::dismissMessage,
-            text = { Text(msg) },
-            confirmButton = { TextButton(onClick = vm.tags::dismissMessage) { Text("OK") } },
         )
     }
 

@@ -8,13 +8,14 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.mutableStateOf
-import com.noworrieshq.restamp.media.MediaFiles
-import com.noworrieshq.restamp.ui.EngineCheckScreen
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import com.noworrieshq.restamp.ui.FileDetailScreen
+import com.noworrieshq.restamp.ui.HomeScreen
+import com.noworrieshq.restamp.ui.Screen
+import com.noworrieshq.restamp.ui.SingleCopyScreen
+import com.noworrieshq.restamp.ui.ViewFileScreen
 import com.noworrieshq.restamp.ui.MatchScreen
 import com.noworrieshq.restamp.ui.MatchViewModel
 import com.noworrieshq.restamp.ui.ReStampTheme
@@ -30,24 +31,26 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         // Needed to see the real GPS in originals (Android blanks it otherwise).
         requestLocationAccess.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
-        val files = MediaFiles(applicationContext)
         setContent {
             ReStampTheme {
-                var engineCheck by rememberSaveable { mutableStateOf(false) }
-                var openFile by rememberSaveable { mutableStateOf<String?>(null) }
-                when {
-                    engineCheck -> {
-                        BackHandler { engineCheck = false }
-                        EngineCheckScreen(files)
-                    }
-                    openFile != null -> {
-                        BackHandler { openFile = null }
-                        FileDetailScreen(matches, openFile!!, onBack = { openFile = null })
-                    }
-                    else -> MatchScreen(
+                BackHandler(enabled = matches.screen != Screen.Home) { matches.back() }
+                when (val screen = matches.screen) {
+                    Screen.Home -> HomeScreen(matches)
+                    Screen.View -> ViewFileScreen(matches)
+                    Screen.Single -> SingleCopyScreen(matches)
+                    Screen.Bulk -> MatchScreen(
                         matches,
-                        onOpenFile = { openFile = it.id },
-                        onOpenEngineCheck = { engineCheck = true },
+                        onOpenFile = { matches.screen = Screen.BulkFile(it.id) },
+                        onHome = { matches.screen = Screen.Home },
+                    )
+                    is Screen.BulkFile -> FileDetailScreen(matches, screen.targetId, onBack = { matches.back() })
+                }
+                // Result of the last save or bulk copy, on whichever screen is showing.
+                matches.tags.lastMessage?.let { msg ->
+                    AlertDialog(
+                        onDismissRequest = matches.tags::dismissMessage,
+                        text = { Text(msg) },
+                        confirmButton = { TextButton(onClick = matches.tags::dismissMessage) { Text("OK") } },
                     )
                 }
             }

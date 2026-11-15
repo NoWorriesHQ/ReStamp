@@ -68,6 +68,13 @@ The person can unpair any match, pair any edited copy by hand (closest names are
 first), and go back to automatic matching. Manual choices always win. The logic is in
 `core/match` and has no Android dependency.
 
+## Home screen
+
+- **View or edit metadata**: pick one photo or video, see its date taken and location (with a
+  thumbnail and the phone's file date for comparison), and set them by hand.
+- **Single file copy**: pick an original and its edited copy, then copy tags across.
+- **Bulk file copy**: pick two folders; files are matched by name (below) and fixed together.
+
 ## Comparing and fixing tags
 
 Every listed file's tags are read in the background. Each matched pair shows a badge per tag,

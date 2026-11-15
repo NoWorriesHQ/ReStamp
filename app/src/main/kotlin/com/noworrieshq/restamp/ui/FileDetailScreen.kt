@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.produceState
@@ -80,7 +81,23 @@ fun FileDetailScreen(vm: MatchViewModel, targetId: String, onBack: () -> Unit) {
         return
     }
     val (target, source) = found
-    val tags = vm.tags
+    FileEditor(vm.tags, target, source, backLabel = "‹ Back to list", showOriginalSlot = true, onBack = onBack)
+}
+
+/**
+ * Shows and edits one file's tags, next to its original when there is one.
+ * [showOriginalSlot] keeps an empty "Original" box when there is none (in the bulk list).
+ */
+@Composable
+fun FileEditor(
+    tags: TagStore,
+    target: MediaFile,
+    source: MediaFile?,
+    backLabel: String,
+    showOriginalSlot: Boolean,
+    onBack: () -> Unit,
+) {
+    LaunchedEffect(target.id, source?.id) { tags.ensureLoaded(listOfNotNull(target, source)) }
     val targetReport = tags.report(target)
     val sourceReport = tags.report(source)
     val plan = if (sourceReport != null && targetReport != null) CopyPlan.between(sourceReport.metadata, targetReport.metadata) else null
@@ -108,13 +125,18 @@ fun FileDetailScreen(vm: MatchViewModel, targetId: String, onBack: () -> Unit) {
             Modifier.fillMaxSize().padding(padding).padding(16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            TextButton(onClick = onBack) { Text("‹ Back to list") }
+            TextButton(onClick = onBack) { Text(backLabel) }
             Text(target.name, style = MaterialTheme.typography.titleLarge)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                FilePreview("Original", source, Modifier.weight(1f))
-                FilePreview("Edited copy", target, Modifier.weight(1f))
+                if (source != null || showOriginalSlot) {
+                    FilePreview("Original", source, Modifier.weight(1f))
+                    FilePreview("Edited copy", target, Modifier.weight(1f))
+                } else {
+                    FilePreview("File", target, Modifier.weight(1f))
+                    Spacer(Modifier.weight(1f))
+                }
             }
-            if (source == null) Text("No original paired. You can still set the tags by hand.", style = MaterialTheme.typography.bodyMedium)
+            if (source == null && showOriginalSlot) Text("No original paired. You can still set the tags by hand.", style = MaterialTheme.typography.bodyMedium)
 
             when {
                 targetReport == null -> FileTagBadges(tags[target])
@@ -202,7 +224,7 @@ private fun FieldCard(
                 }
             }
             if (source != null) ValueLine("Original", source.describe(field))
-            ValueLine("Edited copy", target.describe(field))
+            ValueLine(if (source != null) "Edited copy" else "This file", target.describe(field))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val canCopy = status == FieldStatus.WILL_ADD || status == FieldStatus.DIFFERENT_NEEDS_CONFIRMATION
                 if (source != null) Button(enabled = canCopy, onClick = onCopy) { Text("Copy from original") }

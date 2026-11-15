@@ -18,6 +18,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+sealed interface Screen {
+    data object Home : Screen
+    data object Bulk : Screen
+    data class BulkFile(val targetId: String) : Screen
+    data object View : Screen
+    data object Single : Screen
+}
+
 /** Holds the two picked folders, their files, and how the files are paired. */
 class MatchViewModel(app: Application) : AndroidViewModel(app) {
     private val scanner = FolderScanner(app)
@@ -36,6 +44,35 @@ class MatchViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Tags of the listed files, and writing into the edited copies. */
     val tags = TagStore(MediaFiles(app), viewModelScope)
+
+    /** Which screen is showing. Kept here so it survives rotation. */
+    var screen by mutableStateOf<Screen>(Screen.Home)
+
+    /** The file picked for "view or edit", or the two files picked for a single copy. */
+    var viewing by mutableStateOf<MediaFile?>(null); private set
+    var singleSource by mutableStateOf<MediaFile?>(null); private set
+    var singleTarget by mutableStateOf<MediaFile?>(null); private set
+
+    fun view(uri: Uri) { viewing = picked(uri); screen = Screen.View }
+    fun pickSingleSource(uri: Uri) { singleSource = picked(uri) }
+    fun pickSingleTarget(uri: Uri) { singleTarget = picked(uri) }
+    fun clearSinglePair() { singleTarget = null }
+
+    /** Goes back one level. Returns false at the home screen, so the app can close. */
+    fun back(): Boolean {
+        screen = when (screen) {
+            Screen.Home -> return false
+            is Screen.BulkFile -> Screen.Bulk
+            Screen.Single -> if (singleTarget != null) { singleTarget = null; Screen.Single } else Screen.Home
+            else -> Screen.Home
+        }
+        return true
+    }
+
+    private fun picked(uri: Uri): MediaFile {
+        scanner.keepFileAccess(uri)
+        return MediaFile(uri.toString(), scanner.fileName(uri))
+    }
 
     /** Matched edited copies the person left out of the next bulk copy. */
     var excluded by mutableStateOf(emptySet<String>()); private set
