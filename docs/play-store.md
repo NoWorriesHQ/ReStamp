@@ -47,7 +47,7 @@ Play only shows products once a build containing the billing library has been up
 - **Feature graphic:** 1024×500. This is still needed.
 - **Screenshots:** at least 2 phone screenshots. Take them from the test build.
 - **Category:** Photography.
-- **Privacy policy URL:** needs a public link. The repo is private, so host `docs/privacy-policy.md` somewhere public, such as a free GitHub Pages site from a separate public repo or a page on your website.
+- **Privacy policy URL:** https://noworrieshq.github.io/restamp/privacy/ (published from the public NoWorriesHQ/noworrieshq.github.io repo; update it there when docs/privacy-policy.md changes)
 
 ## 4. App content forms
 
