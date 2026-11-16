@@ -106,17 +106,17 @@ class BulkUnlock(context: Context, private val scope: CoroutineScope) : Purchase
             pending = purchase?.purchaseState == Purchase.PurchaseState.PENDING
             if (owned) {
                 if (!unlocked && !fromRestore) message = "Bulk copy is unlocked. Thank you!"
-                setUnlocked(true)
+                rememberOwned(true)
             } else if (fromRestore) {
                 // Play is the source of truth: no purchase (or a refund) means locked.
-                setUnlocked(false)
+                rememberOwned(false)
             } else if (pending) {
                 message = "Your payment is pending. Bulk copy unlocks as soon as Google Play confirms it."
             }
         }
     }
 
-    private fun setUnlocked(value: Boolean) {
+    private fun rememberOwned(value: Boolean) {
         prefs.edit().putBoolean(KEY, value).apply()
         unlocked = BuildConfig.DEBUG || value
     }
