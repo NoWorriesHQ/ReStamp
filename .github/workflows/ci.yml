@@ -87,7 +87,7 @@ jobs:
           ./gradlew :app:bundleRelease
           rm -f "$RUNNER_TEMP/upload.jks"
           echo "Permissions in the release build:"
-          find app/build/intermediates -path '*release*' -name AndroidManifest.xml -path '*merged_manifest*' | head -1 | xargs grep -o 'uses-permission[^>]*android:name="[^"]*"' | sort -u | tee -a "$GITHUB_STEP_SUMMARY"
+          find app/build/intermediates -path '*release*' -name AndroidManifest.xml -path '*merged_manifest*' | head -1 | xargs grep -oE 'android:name="(android.permission|com.android.vending)[^"]*"' | sort -u | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
