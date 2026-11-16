@@ -24,6 +24,7 @@ sealed interface Screen {
     data class BulkFile(val targetId: String) : Screen
     data object View : Screen
     data object Single : Screen
+    data object History : Screen
 }
 
 /** Holds the two picked folders, their files, and how the files are paired. */

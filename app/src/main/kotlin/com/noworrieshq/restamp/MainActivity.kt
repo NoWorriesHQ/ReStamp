@@ -12,6 +12,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import com.noworrieshq.restamp.ui.FileDetailScreen
+import com.noworrieshq.restamp.ui.HistoryScreen
 import com.noworrieshq.restamp.ui.HomeScreen
 import com.noworrieshq.restamp.ui.Screen
 import com.noworrieshq.restamp.ui.SingleCopyScreen
@@ -44,6 +45,7 @@ class MainActivity : ComponentActivity() {
                         onHome = { matches.screen = Screen.Home },
                     )
                     is Screen.BulkFile -> FileDetailScreen(matches, screen.targetId, onBack = { matches.back() })
+                    Screen.History -> HistoryScreen(matches.tags, onBack = { matches.back() })
                 }
                 // Result of the last save or bulk copy, on whichever screen is showing.
                 matches.tags.lastMessage?.let { msg ->
@@ -51,6 +53,9 @@ class MainActivity : ComponentActivity() {
                         onDismissRequest = matches.tags::dismissMessage,
                         text = { Text(msg) },
                         confirmButton = { TextButton(onClick = matches.tags::dismissMessage) { Text("OK") } },
+                        dismissButton = matches.tags.lastChanges.takeIf { it.isNotEmpty() }?.let { changes ->
+                            { TextButton(onClick = { matches.tags.undo(changes) }) { Text("Undo") } }
+                        },
                     )
                 }
             }
