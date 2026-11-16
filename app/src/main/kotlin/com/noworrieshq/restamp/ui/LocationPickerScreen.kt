@@ -177,6 +177,10 @@ private fun createMap(context: Context): MapView {
         load(context, context.getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
         // OpenStreetMap's tile policy requires an identifying User-Agent.
         userAgentValue = userAgent(context)
+        // Keep the tile cache in app-private storage, so no storage permission is needed and
+        // it goes away with the app.
+        osmdroidBasePath = java.io.File(context.cacheDir, "osmdroid")
+        osmdroidTileCache = java.io.File(context.cacheDir, "osmdroid/tiles")
     }
     return MapView(context).apply {
         setTileSource(TileSourceFactory.MAPNIK)

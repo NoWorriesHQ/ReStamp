@@ -59,6 +59,11 @@ fun HomeScreen(vm: MatchViewModel) {
                 detail = "Pick an originals folder and an edited copies folder. Files are matched by name and fixed together.",
                 onClick = { vm.screen = Screen.Bulk },
             )
+            MenuCard(
+                title = "Recent changes",
+                detail = "See what ReStamp changed in the last 30 days and put files back as they were.",
+                onClick = { vm.screen = Screen.History },
+            )
         }
     }
 }

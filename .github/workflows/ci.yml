@@ -70,6 +70,30 @@ jobs:
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug
 
+      # The Play release: shrunk with R8, so this also catches rules missing for libraries.
+      # Signed with the upload key when the RESTAMP_UPLOAD_* secrets are set, unsigned otherwise.
+      - name: Build release bundle
+        env:
+          RESTAMP_VERSION_CODE: ${{ github.run_number }}
+          KEYSTORE_BASE64: ${{ secrets.RESTAMP_UPLOAD_KEYSTORE_BASE64 }}
+          RESTAMP_UPLOAD_STORE_PASSWORD: ${{ secrets.RESTAMP_UPLOAD_STORE_PASSWORD }}
+          RESTAMP_UPLOAD_KEY_ALIAS: ${{ secrets.RESTAMP_UPLOAD_KEY_ALIAS }}
+          RESTAMP_UPLOAD_KEY_PASSWORD: ${{ secrets.RESTAMP_UPLOAD_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+            export RESTAMP_UPLOAD_KEYSTORE="$RUNNER_TEMP/upload.jks"
+          fi
+          ./gradlew :app:bundleRelease
+          rm -f "$RUNNER_TEMP/upload.jks"
+          echo "Permissions in the release build:"
+          find app/build/intermediates -path '*release*' -name AndroidManifest.xml -path '*merged_manifest*' | head -1 | xargs grep -oE 'android:name="(android.permission|com.android.vending)[^"]*"' | sort -u | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: restamp-release-bundle
+          path: app/build/outputs/bundle/release/*.aab
+
       - uses: actions/upload-artifact@v4
         with:
           name: restamp-debug-apk

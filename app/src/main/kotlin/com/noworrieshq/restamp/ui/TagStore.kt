@@ -13,12 +13,15 @@ import com.noworrieshq.restamp.core.model.MetadataUpdate
 import com.noworrieshq.restamp.core.plan.BatchPlan
 import com.noworrieshq.restamp.core.plan.CopyJob
 import com.noworrieshq.restamp.core.plan.CopyPlan
+import com.noworrieshq.restamp.core.undo.UndoConflictException
 import com.noworrieshq.restamp.media.MediaFiles
+import com.noworrieshq.restamp.media.UndoEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 /** What the app knows about one file's tags. */
 sealed interface FileTags {
@@ -36,6 +39,10 @@ class TagStore(private val files: MediaFiles, private val scope: CoroutineScope)
     /** Batch copy progress as (done, total), or null when no batch is running. */
     var batchProgress by mutableStateOf<Pair<Int, Int>?>(null); private set
     var lastMessage by mutableStateOf<String?>(null); private set
+    /** The changes behind [lastMessage], offered as an Undo button. */
+    var lastChanges by mutableStateOf<List<UndoEntry>>(emptyList()); private set
+    /** Every change that can still be undone, newest first. */
+    var history by mutableStateOf<List<UndoEntry>>(emptyList()); private set
 
     operator fun get(file: MediaFile): FileTags = tags[file.id] ?: FileTags.Loading
 
@@ -68,16 +75,46 @@ class TagStore(private val files: MediaFiles, private val scope: CoroutineScope)
         tags.clear()
     }
 
-    fun dismissMessage() { lastMessage = null }
+    fun dismissMessage() { lastMessage = null; lastChanges = emptyList() }
+
+    fun refreshHistory() {
+        scope.launch { history = withContext(Dispatchers.IO) { files.undoLog.entries() } }
+    }
+
+    /** Takes back [entries], newest first, and rereads those files. */
+    fun undo(entries: List<UndoEntry>) {
+        if (entries.isEmpty()) return
+        scope.launch {
+            var undone = 0
+            val problems = mutableListOf<String>()
+            for (e in entries.sortedByDescending { it.time }) {
+                runCatching { withContext(Dispatchers.IO) { files.undo(e) } }
+                    .onSuccess { undone++ }
+                    .onFailure { ex ->
+                        problems += if (ex is UndoConflictException) "${e.name} was changed again after ReStamp edited it, so it was left alone."
+                        else "${e.name}: ${ex.message}"
+                    }
+                tags[e.uri] = read(e.uri)
+            }
+            lastChanges = emptyList()
+            lastMessage = buildString {
+                append(if (undone == 1 && entries.size == 1) "Put ${entries[0].name} back as it was." else "Put $undone of ${entries.size} files back as they were.")
+                problems.take(3).forEach { append("\n\n").append(it) }
+                if (problems.size > 3) append("\n\n…and ${problems.size - 3} more.")
+            }
+            history = withContext(Dispatchers.IO) { files.undoLog.entries() }
+        }
+    }
 
     /** Writes into one edited copy. [confirmed] lists the overwrites the person agreed to. */
     fun write(target: MediaFile, update: MetadataUpdate, confirmed: Set<MetadataField>) {
         scope.launch {
-            lastMessage = runCatching { withContext(Dispatchers.IO) { files.write(Uri.parse(target.id), update, confirmed) } }
-                .fold(
-                    { r -> if (r.written.isEmpty()) "Nothing changed: ${target.name} already had those tags." else "Saved ${r.written.fieldNames()} to ${target.name}." },
-                    { e -> "Couldn't save ${target.name}: ${e.message}" },
-                )
+            val outcome = runCatching { withContext(Dispatchers.IO) { files.write(Uri.parse(target.id), target.name, update, confirmed) } }
+            lastChanges = listOfNotNull(outcome.getOrNull()?.second)
+            lastMessage = outcome.fold(
+                { (r, _) -> if (r.written.isEmpty()) "Nothing changed: ${target.name} already had those tags." else "Saved ${r.written.fieldNames()} to ${target.name}." },
+                { e -> "Couldn't save ${target.name}: ${e.message}" },
+            )
             tags[target.id] = read(target.id)
         }
     }
@@ -89,15 +126,19 @@ class TagStore(private val files: MediaFiles, private val scope: CoroutineScope)
             var done = 0
             var failed = 0
             var firstError: String? = null
+            val batch = UUID.randomUUID().toString()
+            val changes = mutableListOf<UndoEntry>()
             batchProgress = 0 to jobs.size
             for (job in jobs) {
-                runCatching { withContext(Dispatchers.IO) { files.write(Uri.parse(job.id), job.update, job.confirmed) } }
+                runCatching { withContext(Dispatchers.IO) { files.write(Uri.parse(job.id), names[job.id] ?: "file", job.update, job.confirmed, batch) } }
+                    .onSuccess { (_, entry) -> entry?.let(changes::add) }
                     .onFailure { e -> failed++; if (firstError == null) firstError = "${names[job.id] ?: "a file"}: ${e.message}" }
                 tags[job.id] = read(job.id)
                 done++
                 batchProgress = done to jobs.size
             }
             batchProgress = null
+            lastChanges = changes
             lastMessage = buildString {
                 append("Updated ${jobs.size - failed} of ${jobs.size} files.")
                 if (failed > 0) append(" $failed failed, first was $firstError")
