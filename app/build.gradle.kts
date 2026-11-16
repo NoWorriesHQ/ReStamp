@@ -17,7 +17,22 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        // A fixed debug key, so each CI test build installs over the previous one. Every CI run
+        // otherwise makes its own random debug key and Android refuses the update. This key is
+        // only for test builds; the Play release gets its own private key in step 4.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -39,11 +54,17 @@ android {
     }
 }
 
+tasks.withType<Test>().configureEach {
+    // Not a tracked input otherwise, so a cached result could stand in for a run over real photos.
+    inputs.property("jpegCorpus", System.getenv("RESTAMP_JPEG_CORPUS").orEmpty())
+}
+
 dependencies {
     implementation(project(":core"))
     implementation(libs.androidx.exifinterface)
     implementation(libs.androidx.activity.compose)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.osmdroid)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)

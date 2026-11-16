@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import com.noworrieshq.restamp.core.match.MediaFile
 
 /** Lists the photos and videos in a folder the person picked with the system folder picker. */
@@ -18,6 +19,16 @@ class FolderScanner(private val context: Context) {
         runCatching { resolver.takePersistableUriPermission(tree, readWrite) }
             .recoverCatching { resolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
     }
+
+    /** Keeps access to a single picked file, with write access when the picker granted it. */
+    fun keepFileAccess(uri: Uri) = keepAccess(uri)
+
+    /** The file's display name, or the last part of its URI. */
+    fun fileName(uri: Uri): String = runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/') ?: uri.toString()
 
     fun hasAccess(tree: Uri): Boolean =
         context.contentResolver.persistedUriPermissions.any { it.uri == tree && it.isReadPermission }

@@ -92,6 +92,13 @@ class JpegMetadataAccessor(
 
     private fun writeLocation(exif: ExifInterface, location: GeoLocation) {
         exif.setLatLong(location.latitude, location.longitude)
-        location.altitudeMeters?.let { exif.setAltitude(it) }
+        val altitude = location.altitudeMeters
+        if (altitude != null) {
+            exif.setAltitude(altitude)
+        } else {
+            // An altitude left over from the old position would no longer be true.
+            exif.setAttribute(ExifInterface.TAG_GPS_ALTITUDE, null)
+            exif.setAttribute(ExifInterface.TAG_GPS_ALTITUDE_REF, null)
+        }
     }
 }

@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # to publish the test APK as a pre-release
     steps:
       - uses: actions/checkout@v4
 
@@ -33,8 +35,37 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # ffprobe/ffmpeg independently check the videos the engine writes (Mp4FormatMatrixTest).
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg > /dev/null
+
+      # Real photos and videos from many phones and cameras, from two public collections:
+      # drewnoakes/metadata-extractor-images ("free to use however you wish") and the
+      # Apache-2.0 test data of google/libultrahdr (Ultra HDR / gain map JPEGs).
+      - name: Fetch public sample files
+        run: |
+          set -e
+          git clone -q --depth 1 --filter=blob:none --sparse https://github.com/drewnoakes/metadata-extractor-images "$RUNNER_TEMP/mei"
+          git -C "$RUNNER_TEMP/mei" sparse-checkout set --no-cone '/mp4/*.mp4' '/mov/*.mov' '/3gp/*.3gp' '/m4v/*.m4v' \
+            '/jpg/Google *' '/jpg/Nexus *' '/jpg/Apple iPhone *' '/jpg/Samsung GT-*' '/jpg/Samsung SM-*' \
+            '/jpg/HTC One*' '/jpg/OnePlus*' '/jpg/Motorola *'
+          git clone -q --depth 1 --filter=blob:none --sparse https://github.com/google/libultrahdr "$RUNNER_TEMP/uhdr"
+          git -C "$RUNNER_TEMP/uhdr" sparse-checkout set --no-cone '/tests/data/*.jpg'
+          echo "RESTAMP_VIDEO_CORPUS=$RUNNER_TEMP/mei" >> "$GITHUB_ENV"
+          echo "RESTAMP_JPEG_CORPUS=$RUNNER_TEMP/mei/jpg:$RUNNER_TEMP/uhdr/tests/data" >> "$GITHUB_ENV"
+
       - name: Unit tests (engine + JPEG via Robolectric)
         run: ./gradlew :core:test :app:testDebugUnitTest --stacktrace
+
+      - name: Sample file results
+        if: always()
+        run: |
+          echo "Sample videos: $(find "$RUNNER_TEMP/mei" -type f \( -name '*.mp4' -o -name '*.mov' -o -name '*.3gp' -o -name '*.m4v' \) | wc -l), sample photos: $(find "$RUNNER_TEMP/mei/jpg" "$RUNNER_TEMP/uhdr/tests/data" -maxdepth 1 -type f -iname '*.jp*g' | wc -l)"
+          for f in core/build/test-results/test/TEST-*CorpusTest.xml app/build/test-results/testDebugUnitTest/TEST-*CorpusTest.xml; do
+            [ -f "$f" ] || continue
+            grep -o 'tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*"' "$f" | head -1 | sed "s|^|$(basename "$f"): |"
+            grep -hoE '(OK|REFUSED|FAILED) +[^&<]*' "$f" | tee -a "$GITHUB_STEP_SUMMARY" || true
+          done
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug
@@ -43,6 +74,28 @@ jobs:
         with:
           name: restamp-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+
+      # Run artifacts are zipped and hidden in the GitHub mobile app, so each PR also gets a
+      # pre-release with the plain .apk, which a phone can download and install directly.
+      - name: Publish test APK as a pre-release
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          TAG="test-pr-$PR"
+          APK="restamp-pr$PR-debug.apk"
+          cp app/build/outputs/apk/debug/*.apk "$APK"
+          NOTES="Debug test build of PR #$PR at commit ${SHA:0:7}. For testing only: back up your photos first."
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber
+            gh release edit "$TAG" --notes "$NOTES"
+          else
+            gh release create "$TAG" "$APK" --prerelease --target "$SHA" --title "Test build: PR #$PR" --notes "$NOTES"
+          fi
+          echo "APK: https://github.com/$GH_REPO/releases/download/$TAG/$APK" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: always()

@@ -7,14 +7,14 @@ Built for Google Pixel files (JPEG and MP4) on Android 17, and kept Play Store c
 
 ## Status
 
-Step 2 of 4: matching originals to edited copies.
+Step 3 of 4: comparison and editing screens.
 
 | Step | What | State |
 |---|---|---|
 | 1 | Metadata engine for JPEG + MP4 | ✅ |
-| 2 | Match originals to edited copies across folders | ✅ this PR |
-| 3 | Comparison and editing screens (bulk copy, manual date, map/city picker) | next |
-| 4 | Undo/backup, privacy policy, billing, signed release | |
+| 2 | Match originals to edited copies across folders | ✅ |
+| 3 | Comparison and editing screens (bulk copy, manual date, map/city picker) | ✅ this PR |
+| 4 | Undo/backup, privacy policy, billing, signed release | next |
 
 ## Stack
 
@@ -25,8 +25,8 @@ best. The project is split into two modules:
   "never overwrite without confirmation" rule, the copy plan used by the UI, and a
   hand-written MP4 metadata reader/writer (Android has no API for editing video tags).
   Its tests run on any machine in seconds.
-- **`app`**: the Android app. Uses AndroidX ExifInterface for JPEG, opens files via the
-  system picker, and has a simple test screen for the engine.
+- **`app`**: the Android app. Uses AndroidX ExifInterface for JPEG, opens folders via the
+  system picker, and has the matching, comparison and editing screens.
 
 ## How the engine handles each format
 
@@ -67,6 +67,32 @@ with a file that looks less edited than itself, so in a shared folder originals 
 The person can unpair any match, pair any edited copy by hand (closest names are suggested
 first), and go back to automatic matching. Manual choices always win. The logic is in
 `core/match` and has no Android dependency.
+
+## Home screen
+
+- **View or edit metadata**: pick one photo or video, see its date taken and location (with a
+  thumbnail and the phone's file date for comparison), and set them by hand.
+- **Single file copy**: pick an original and its edited copy, then copy tags across.
+- **Bulk file copy**: pick two folders; files are matched by name (below) and fixed together.
+
+## Comparing and fixing tags
+
+Every listed file's tags are read in the background. Each matched pair shows a badge per tag,
+with a symbol as well as a colour: ✓ already matches, ✗ missing in the edited copy (will be
+added), ≠ different from the original (needs your OK), – the original doesn't have it either.
+
+- **Bulk copy**: tick pairs (all are ticked by default) and tap *Copy tags*. Missing tags are
+  added. Replacing a tag that differs is a separate, unticked option per tag, since edited
+  copies usually carry the edit time as their date.
+- **One file**: tap a pair (or an edited copy with no original) to see both files' values side by
+  side, copy one tag or both, or set them by hand: a date and time picker in the phone's time
+  zone, and a map picker with city search.
+- Any change that would replace an existing tag shows the current and new value first. The
+  engine itself also refuses unconfirmed overwrites, so the UI can't skip that step.
+
+The map uses OpenStreetMap through osmdroid, and city search uses OpenStreetMap's Nominatim. Both
+are free and need no key. Search runs only when you submit (Nominatim's policy), and sends just
+the search text. Only the location picker uses the internet.
 
 ## Things learned from real Pixel files
 

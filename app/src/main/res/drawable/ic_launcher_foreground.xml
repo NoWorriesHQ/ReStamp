@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A photo with a location pin: ReStamp puts the place (and date) back into photos. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M33,45 H63 A4,4 0 0 1 67,49 V71 A4,4 0 0 1 63,75 H33 A4,4 0 0 1 29,71 V49 A4,4 0 0 1 33,45 Z" />
+    <path android:fillColor="#CFEAF0"
+        android:pathData="M33.5,48 H62.5 A1.5,1.5 0 0 1 64,49.5 V69.5 A1.5,1.5 0 0 1 62.5,71 H33.5 A1.5,1.5 0 0 1 32,69.5 V49.5 A1.5,1.5 0 0 1 33.5,48 Z" />
+    <path android:fillColor="#0E5E6F"
+        android:pathData="M32,71 L42,58 L49,65 L55,59 L64,71 Z" />
+    <path android:fillColor="#F4A62A"
+        android:pathData="M39,53 m-2.5,0 a2.5,2.5 0 1,0 5,0 a2.5,2.5 0 1,0 -5,0" />
+    <path android:fillColor="#F26B3A"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineJoin="round"
+        android:pathData="M68,60 C63,53 60,49.5 60,44 A8,8 0 1,1 76,44 C76,49.5 73,53 68,60 Z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M68,44 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+</vector>
