@@ -13,8 +13,9 @@ android {
         // Android 10: scoped storage and ACCESS_MEDIA_LOCATION both start here.
         minSdk = 29
         targetSdk = 37 // Android 17
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI sets the code from the run number so each upload to Play is higher than the last.
+        versionCode = System.getenv("RESTAMP_VERSION_CODE")?.toIntOrNull() ?: 1
+        versionName = "1.0.0"
     }
 
     signingConfigs {
@@ -27,6 +28,15 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        // The private upload key for Play. It never goes in the repo: CI gets it from secrets.
+        System.getenv("RESTAMP_UPLOAD_KEYSTORE")?.let { path ->
+            create("release") {
+                storeFile = file(path)
+                storePassword = System.getenv("RESTAMP_UPLOAD_STORE_PASSWORD")
+                keyAlias = System.getenv("RESTAMP_UPLOAD_KEY_ALIAS")
+                keyPassword = System.getenv("RESTAMP_UPLOAD_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -34,6 +44,7 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -47,6 +58,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions {
@@ -65,6 +77,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.osmdroid)
+    implementation(libs.billing)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)

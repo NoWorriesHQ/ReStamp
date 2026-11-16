@@ -29,6 +29,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.activity.compose.LocalActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,6 +55,8 @@ fun MatchScreen(vm: MatchViewModel, onOpenFile: (MediaFile) -> Unit, onHome: () 
     val pickTarget = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { it?.let(vm::pickTarget) }
     var choosingFor by remember { mutableStateOf<MediaFile?>(null) }
     var bulkCopying by remember { mutableStateOf(false) }
+    var unlocking by remember { mutableStateOf(false) }
+    val activity = LocalActivity.current
     val result = vm.result
 
     Scaffold { padding ->
@@ -125,7 +128,7 @@ fun MatchScreen(vm: MatchViewModel, onOpenFile: (MediaFile) -> Unit, onHome: () 
                 }
 
                 section("Matched", result.pairs.size)
-                if (result.pairs.isNotEmpty()) item(key = "bulk") { BulkBar(vm) { bulkCopying = true } }
+                if (result.pairs.isNotEmpty()) item(key = "bulk") { BulkBar(vm) { if (vm.unlock.unlocked) bulkCopying = true else unlocking = true } }
                 items(result.pairs, key = { "p" + it.target.id }) { p ->
                     PairRow(p, vm, onOpen = { onOpenFile(p.target) }, onChange = { choosingFor = p.target })
                 }
@@ -152,6 +155,22 @@ fun MatchScreen(vm: MatchViewModel, onOpenFile: (MediaFile) -> Unit, onHome: () 
                 bulkCopying = false
                 vm.tags.run(jobs, selected.associate { it.target.id to it.target.name })
             },
+        )
+    }
+
+    if (unlocking) {
+        UnlockDialog(
+            price = vm.unlock.price,
+            pending = vm.unlock.pending,
+            onBuy = { unlocking = false; activity?.let(vm.unlock::buy) },
+            onDismiss = { unlocking = false },
+        )
+    }
+    vm.unlock.message?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { vm.unlock.message = null },
+            text = { Text(msg) },
+            confirmButton = { TextButton(onClick = { vm.unlock.message = null }) { Text("OK") } },
         )
     }
 
@@ -292,4 +311,23 @@ private fun MatchConfidence.label() = when (this) {
     MatchConfidence.SAME_BASE_NAME -> "Name match"
     MatchConfidence.SAME_CAPTURE_TIME -> "Same capture time, check"
     MatchConfidence.MANUAL -> "Paired by you"
+}
+
+/** Explains the one-time purchase before Google Play's own sheet opens. */
+@Composable
+private fun UnlockDialog(price: String?, pending: Boolean, onBuy: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Unlock bulk copy") },
+        text = {
+            Text(
+                if (pending) "Your payment is pending with Google Play. Bulk copy unlocks as soon as it's confirmed."
+                else "Copying a whole folder at once is a one-time purchase${price?.let { " of $it" } ?: ""}. " +
+                    "Matching and comparing stay free here, and you can still fix files one at a time by tapping them, " +
+                    "or with Single file copy on the home screen.",
+            )
+        },
+        confirmButton = { if (!pending) TextButton(onClick = onBuy) { Text(price?.let { "Buy for $it" } ?: "Buy") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Not now") } },
+    )
 }

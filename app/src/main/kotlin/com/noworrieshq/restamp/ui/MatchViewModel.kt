@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.noworrieshq.restamp.billing.BulkUnlock
 import com.noworrieshq.restamp.core.match.FileMatcher
 import com.noworrieshq.restamp.core.match.ManualChoices
 import com.noworrieshq.restamp.core.match.MatchResult
@@ -45,6 +46,9 @@ class MatchViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Tags of the listed files, and writing into the edited copies. */
     val tags = TagStore(MediaFiles(app), viewModelScope)
+
+    /** The one-time purchase that unlocks bulk copy. */
+    val unlock = BulkUnlock(app, viewModelScope).also { it.start() }
 
     /** Which screen is showing. Kept here so it survives rotation. */
     var screen by mutableStateOf<Screen>(Screen.Home)
