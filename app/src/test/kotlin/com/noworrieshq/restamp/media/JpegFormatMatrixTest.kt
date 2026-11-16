@@ -143,41 +143,6 @@ class JpegFormatMatrixTest {
         assertNull(m.location!!.altitudeMeters)
     }
 
-    private fun indexOf(hay: ByteArray, needle: ByteArray): Int {
-        outer@ for (i in 0..hay.size - needle.size) {
-            for (j in needle.indices) if (hay[i + j] != needle[j]) continue@outer
-            return i
-        }
-        return -1
-    }
-
-    /** The second image an MPF (CIPA DC-007) index points to, or null when there's no index. */
-    private fun secondImage(bytes: ByteArray): ByteArray? {
-        val mpf = indexOf(bytes, byteArrayOf(0x4D, 0x50, 0x46, 0x00))
-        if (mpf < 0) return null
-        val base = mpf + 4
-        val big = bytes[base] == 0x4D.toByte()
-        fun u16(p: Int) = if (big) ((bytes[p].toInt() and 0xFF) shl 8) or (bytes[p + 1].toInt() and 0xFF)
-            else ((bytes[p + 1].toInt() and 0xFF) shl 8) or (bytes[p].toInt() and 0xFF)
-        fun u32(p: Int) = if (big) (u16(p).toLong() shl 16) or u16(p + 2).toLong() else (u16(p + 2).toLong() shl 16) or u16(p).toLong()
-        val ifd = base + u32(base + 4).toInt()
-        val count = u16(ifd)
-        for (k in 0 until count) {
-            val e = ifd + 2 + k * 12
-            if (u16(e) == 0xB002) {
-                val entries = base + u32(e + 8).toInt()
-                val size = u32(entries + 16 + 4).toInt()
-                val offset = u32(entries + 16 + 8).toInt()
-                val start = base + offset
-                if (start + size > bytes.size || bytes[start] != 0xFF.toByte() || bytes[start + 1] != 0xD8.toByte()) {
-                    return byteArrayOf()
-                }
-                return bytes.copyOfRange(start, start + size)
-            }
-        }
-        return null
-    }
-
     private companion object {
         const val PROGRESSIVE = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wgARCAAQABADASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAL/xAAVAQEBAAAAAAAAAAAAAAAAAAAEBv/aAAwDAQACEAMQAAABgCpP/8QAFxAAAwEAAAAAAAAAAAAAAAAAAAQFFP/aAAgBAQABBQKYhuKaGEmP4Sm/uP/EABsRAAAHAQAAAAAAAAAAAAAAAAAUJDFRYoGR/9oACAEDAQE/AVBimR1x/8QAFxEAAwEAAAAAAAAAAAAAAAAAABIiYf/aAAgBAgEBPwGV0//EABkQAAIDAQAAAAAAAAAAAAAAABESAAMjQf/aAAgBAQAGPwKzREHDK9Hc8Eszdx0SvNEPTP/EABkQAAEFAAAAAAAAAAAAAAAAABEAAVFh0f/aAAgBAQABPyHdyJtoWbkBbys3IGnlbuRFNC//2gAMAwEAAgADAAAAEP8A/8QAFhEBAQEAAAAAAAAAAAAAAAAA8AAx/9oACAEDAQE/EBAy/8QAGREAAQUAAAAAAAAAAAAAAAAAABExUZHw/9oACAECAQE/ENlmmP/EABkQAAEFAAAAAAAAAAAAAAAAAAARMWFx8P/aAAgBAQABPxDcf4Eu5uP8i1Y3H+Rasbj/AAJdz//Z"
         const val CAMERA_EXIF_NO_GPS = "/9j/4AAQSkZJRgABAQAAAQABAAD/4QBsRXhpZgAATU0AKgAAAAgABAEPAAIAAAAHAAAAPgEQAAIAAAAJAAAARgESAAMAAAABAAYAAAEyAAIAAAAUAAAAUAAAAABHb29nbGUAAFBpeGVsIDlhAAAyMDI0OjEwOjA3IDA5OjAwOjAwAP/bAEMABgQFBgUEBgYFBgcHBggKEAoKCQkKFA4PDBAXFBgYFxQWFhodJR8aGyMcFhYgLCAjJicpKikZHy0wLSgwJSgpKP/bAEMBBwcHCggKEwoKEygaFhooKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKP/AABEIABAAEAMBIgACEQEDEQH/xAAfAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgv/xAC1EAACAQMDAgQDBQUEBAAAAX0BAgMABBEFEiExQQYTUWEHInEUMoGRoQgjQrHBFVLR8CQzYnKCCQoWFxgZGiUmJygpKjQ1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4eLj5OXm5+jp6vHy8/T19vf4+fr/xAAfAQADAQEBAQEBAQEBAAAAAAAAAQIDBAUGBwgJCgv/xAC1EQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/2gAMAwEAAhEDEQA/AOs8DeEv+Ep+2/6b9l+zbP8Allv3bt3+0Mfd/Wjxz4S/4Rb7F/pv2r7Tv/5ZbNu3b/tHP3v0o8DeLf8AhFvtv+hfavtOz/lrs27d3+yc/e/Sjxz4t/4Sn7F/oX2X7Nv/AOWu/du2/wCyMfd/Wvj/APZfqv8A08+ff7tj4L/YvqX/AE++ff7tv6uf/9k="
