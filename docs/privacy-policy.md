@@ -51,4 +51,4 @@ If this policy changes, the new version will be posted at this address, with a n
 
 ## Contact
 
-Questions: CONTACT_EMAIL
+Questions: tools@noworries-hq.com
