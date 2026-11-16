@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!--
       Without this, Android blanks out GPS in every photo and video the app reads, and the
@@ -11,6 +12,14 @@
     <!-- Only for the location picker: OpenStreetMap map tiles and city search. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+      osmdroid's own manifest asks for broad storage access for an old shared tile cache. The
+      cache is kept in app storage instead (see LocationPickerScreen), so drop them: Play
+      restricts these and they'd need a policy declaration.
+    -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
 
     <application
         android:allowBackup="false"
